@@ -1,0 +1,19 @@
+{
+  "name": "mirava-mirrors-sync",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@ruslanpdf/uptime-kuma-api": "^1.0.2",
+    "@t3-oss/env-core": "^0.13.11",
+    "axios": "^1.16.1",
+    "uptimekuma-api": "^1.1.1",
+    "zod": "^4.4.3"
+  }
+}
