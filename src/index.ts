@@ -1,20 +1,28 @@
 
 import { fetchAllMirrors } from "./lib/mirava-mirrors";
+import { initializeUptimeKumaClient } from "./lib/uptime-kuma/initializeUptimeKumaClient";
+import { addMirrorMonitors } from "./lib/uptime-kuma/addMirrorMonitors";
 
-console.log("Fetching all mirrors...");
+console.log("[Mirava Sync] Starting...");
 
-const mirrors = await fetchAllMirrors();
+try {
+  console.log("[Mirava Sync] Connecting to Uptime Kuma...");
+  await initializeUptimeKumaClient();
 
-const allMirrors = [
-  ...mirrors.global_mirrors,
-  ...mirrors.official_iran_mirrors,
-];
+  console.log("[Mirava Sync] Fetching mirrors...");
+  const mirrors = await fetchAllMirrors();
 
-console.log(`Found ${allMirrors.length} mirrors.`);
+  const allMirrors = [
+    ...mirrors.global_mirrors,
+    ...mirrors.official_iran_mirrors,
+  ];
 
-for (const mirror of allMirrors) {
-  console.log(`- ${mirror.name}: ${mirror.url}`);
+  console.log(`[Mirava Sync] Found ${allMirrors.length} mirrors.`);
+
+  const created = await addMirrorMonitors(allMirrors);
+
+  console.log(`[Mirava Sync] Completed. New monitors: ${created.length}`);
+} catch (error) {
+  console.error("[Mirava Sync] Failed:", error);
+  process.exitCode = 1;
 }
-
-console.log("Mirror list fetched successfully.");
-console.log("Dry run completed. No Uptime Kuma changes were made.");
