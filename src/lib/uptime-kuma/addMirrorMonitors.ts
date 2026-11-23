@@ -5,6 +5,10 @@ import { uptimeKumaClient } from "./client";
 
 type Fn<T> = () => Promise<T>;
 
+function normalizeUrl(url: string) {
+  return url.trim().replace(/\/+$/, "");
+}
+
 async function runWithConcurrency<T>(
   tasks: Array<Fn<T>>,
   concurrency: number,
@@ -33,19 +37,12 @@ async function runWithConcurrency<T>(
 export async function addMirrorMonitors(
   mirrors: Array<Mirror>,
   opts?: { concurrency?: number },
-) {
+): Promise<number[]> {
   const concurrency = opts?.concurrency ?? 2;
 
   console.log("[Mirava Sync] Fetching existing monitors...");
 
   const existingMonitors = await uptimeKumaClient.getMonitors();
-
-  const existingUrls = new Set(
-    existingMonitors
-      .map((monitor) => monitor.url)
-      .filter((url): url is string => Boolean(url))
-      .map((url) => url.trim().replace(/\/+$/, "")),
-  );
 
   const desiredMonitors: Array<{
     name: string;
@@ -70,16 +67,20 @@ export async function addMirrorMonitors(
 
   const uniqueMonitors = new Map(
     desiredMonitors.map((monitor) => [
-      monitor.url.trim().replace(/\/+$/, ""),
+      normalizeUrl(monitor.url),
       monitor,
     ]),
   );
 
+  const existingUrls = new Set(
+    existingMonitors
+      .map((monitor) => monitor.url)
+      .filter((url): url is string => Boolean(url))
+      .map(normalizeUrl),
+  );
+
   const newMonitors = [...uniqueMonitors.values()].filter(
-    (monitor) =>
-      !existingUrls.has(
-        monitor.url.trim().replace(/\/+$/, ""),
-      ),
+    (monitor) => !existingUrls.has(normalizeUrl(monitor.url)),
   );
 
   console.log(
@@ -101,9 +102,22 @@ export async function addMirrorMonitors(
     });
   });
 
-  const created = await runWithConcurrency(tasks, concurrency);
+  await runWithConcurrency(tasks, concurrency);
 
-  console.log(`[Mirava Sync] Created ${created.length} monitors.`);
+  const updatedMonitors = await uptimeKumaClient.getMonitors();
 
-  return created;
+  const monitorIds = [...uniqueMonitors.keys()]
+    .map((url) =>
+      updatedMonitors.find(
+        (monitor) =>
+          monitor.url && normalizeUrl(monitor.url) === url,
+      )?.id,
+    )
+    .filter((id): id is number => typeof id === "number");
+
+  console.log(
+    `[Mirava Sync] Resolved ${monitorIds.length} mirror monitor IDs.`,
+  );
+
+  return [...new Set(monitorIds)];
 }
