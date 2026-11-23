@@ -1,11 +1,15 @@
+
 import { MonitorType } from "@ruslanpdf/uptime-kuma-api";
 import type { Mirror } from "../mirava-mirrors";
 import { uptimeKumaClient } from "./client";
 
 type Fn<T> = () => Promise<T>;
 
-async function runWithConcurrency<T>(tasks: Array<Fn<T>>, concurrency: number) {
-  const results: T[] = new Array(tasks.length);
+async function runWithConcurrency<T>(
+  tasks: Array<Fn<T>>,
+  concurrency: number,
+) {
+  const results: T[] = [];
   let nextIndex = 0;
 
   async function worker() {
@@ -16,76 +20,90 @@ async function runWithConcurrency<T>(tasks: Array<Fn<T>>, concurrency: number) {
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(concurrency, tasks.length) },
-    () => worker(),
+  await Promise.all(
+    Array.from(
+      { length: Math.min(concurrency, tasks.length) },
+      () => worker(),
+    ),
   );
 
-  await Promise.all(workers);
   return results;
 }
 
-export async function addMirrorMonitors(mirrors: Array<Mirror>, opts?: { concurrency?: number }) {
+export async function addMirrorMonitors(
+  mirrors: Array<Mirror>,
+  opts?: { concurrency?: number },
+) {
   const concurrency = opts?.concurrency ?? 2;
 
-  console.log(`[addMirrorMonitors] Starting. mirrors=${mirrors.length}, concurrency=${concurrency}`);
+  console.log("[Mirava Sync] Fetching existing monitors...");
 
-  // Build a flat list of tasks, then execute with limited concurrency.
-  const tasks: Array<() => Promise<any>> = [];
+  const existingMonitors = await uptimeKumaClient.getMonitors();
 
-  for (let mIdx = 0; mIdx < mirrors.length; mIdx++) {
-    const mirror = mirrors[mIdx]!;
+  const existingUrls = new Set(
+    existingMonitors
+      .map((monitor) => monitor.url)
+      .filter((url): url is string => Boolean(url))
+      .map((url) => url.trim().replace(/\/+$/, "")),
+  );
 
+  const desiredMonitors: Array<{
+    name: string;
+    url: string;
+  }> = [];
+
+  for (const mirror of mirrors) {
     if (mirror.packageUrls?.length) {
-      console.log(
-        `[addMirrorMonitors] Mirror [${mIdx + 1}/${mirrors.length}] "${mirror.name}" has ${mirror.packageUrls.length} packageUrls`,
-      );
-
-      for (let pIdx = 0; pIdx < mirror.packageUrls.length; pIdx++) {
-        const pckg = mirror.packageUrls[pIdx];
-
-        tasks.push(async () => {
-          console.log(
-            `[addMirrorMonitors] Adding monitor (${mIdx + 1}/${mirrors.length}) pkg [${pIdx + 1}/${mirror.packageUrls!.length}] "${mirror.name}: ${pckg.name}"`,
-          );
-
-          return uptimeKumaClient.addMonitor({
-            name: `${mirror.name}: ${pckg.name}`,
-            type: MonitorType.HTTP,
-            accepted_statuscodes: ["200-299"],
-            active: true,
-            url: pckg.url,
-            method: "GET",
-            interval: 60,
-            timeout: 60,
-          });
+      for (const pkg of mirror.packageUrls) {
+        desiredMonitors.push({
+          name: `${mirror.name}: ${pkg.name}`,
+          url: pkg.url,
         });
       }
     } else {
-      console.log(
-        `[addMirrorMonitors] Mirror [${mIdx + 1}/${mirrors.length}] "${mirror.name}" has no packageUrls; adding single monitor`,
-      );
-
-      tasks.push(async () => {
-        console.log(`[addMirrorMonitors] Adding monitor "${mirror.name}" url=${mirror.url}`);
-        return uptimeKumaClient.addMonitor({
-          name: mirror.name,
-          type: MonitorType.HTTP,
-          accepted_statuscodes: ["200-299"],
-          active: true,
-          url: mirror.url,
-          method: "GET",
-          interval: 60,
-          timeout: 60,
-        });
+      desiredMonitors.push({
+        name: mirror.name,
+        url: mirror.url,
       });
     }
   }
 
-  console.log(`[addMirrorMonitors] Queued tasks=${tasks.length}`);
+  const uniqueMonitors = new Map(
+    desiredMonitors.map((monitor) => [
+      monitor.url.trim().replace(/\/+$/, ""),
+      monitor,
+    ]),
+  );
+
+  const newMonitors = [...uniqueMonitors.values()].filter(
+    (monitor) =>
+      !existingUrls.has(
+        monitor.url.trim().replace(/\/+$/, ""),
+      ),
+  );
+
+  console.log(
+    `[Mirava Sync] Existing=${existingMonitors.length}, New=${newMonitors.length}`,
+  );
+
+  const tasks: Array<Fn<unknown>> = newMonitors.map((monitor) => async () => {
+    console.log(`[Mirava Sync] Adding: ${monitor.name}`);
+
+    return uptimeKumaClient.addMonitor({
+      name: monitor.name,
+      type: MonitorType.HTTP,
+      accepted_statuscodes: ["200-299"],
+      active: true,
+      url: monitor.url,
+      method: "GET",
+      interval: 60,
+      timeout: 60,
+    });
+  });
 
   const created = await runWithConcurrency(tasks, concurrency);
 
-  console.log(`[addMirrorMonitors] Done. created=${created.length}`);
+  console.log(`[Mirava Sync] Created ${created.length} monitors.`);
+
   return created;
 }
