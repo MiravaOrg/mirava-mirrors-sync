@@ -2,6 +2,7 @@
 import { fetchAllMirrors } from "./lib/mirava-mirrors";
 import { initializeUptimeKumaClient } from "./lib/uptime-kuma/initializeUptimeKumaClient";
 import { addMirrorMonitors } from "./lib/uptime-kuma/addMirrorMonitors";
+import { createMirrorsStatusPage } from "./lib/uptime-kuma/createMirrorsStatusPage";
 
 console.log("[Mirava Sync] Starting...");
 
@@ -19,9 +20,17 @@ try {
 
   console.log(`[Mirava Sync] Found ${allMirrors.length} mirrors.`);
 
-  const created = await addMirrorMonitors(allMirrors);
+  console.log("[Mirava Sync] Synchronizing monitor list...");
+  const mirrorMonitorIds = await addMirrorMonitors(allMirrors);
 
-  console.log(`[Mirava Sync] Completed. New monitors: ${created.length}`);
+  console.log(
+    `[Mirava Sync] Resolved ${mirrorMonitorIds.length} mirror monitors.`,
+  );
+
+  console.log("[Mirava Sync] Updating status page...");
+  await createMirrorsStatusPage(mirrorMonitorIds);
+
+  console.log("[Mirava Sync] Synchronization completed successfully.");
 } catch (error) {
   console.error("[Mirava Sync] Failed:", error);
   process.exitCode = 1;
